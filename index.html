@@ -68,6 +68,8 @@
   </select>
   <input type="text" id="produitPrix" placeholder="Prix (FCFA)">
   <input type="text" id="produitWhatsapp" placeholder="Ton numéro WhatsApp">
+  <input type="file" id="produitPhoto" accept="image/*" multiple capture="environment">
+  <p style="font-size:11px;color:#888;margin:2px 0 0;">Jusqu'à 4 photos.</p>
   <button onclick="publierProduit()">Publier +50F</button>
   <div class="msg" id="msgProduit"></div>
   <div class="produits-liste" id="listeProduits"></div>
@@ -194,11 +196,35 @@
     document.getElementById("codeParrainage").value = "";
   };
 
+  function compresserImage(fichier) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const maxLargeur = 400;
+          const ratio = Math.min(1, maxLargeur / img.width);
+          const canvas = document.createElement("canvas");
+          canvas.width = img.width * ratio;
+          canvas.height = img.height * ratio;
+          const ctx = canvas.getContext("2d");
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          resolve(canvas.toDataURL("image/jpeg", 0.5));
+        };
+        img.onerror = reject;
+        img.src = e.target.result;
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(fichier);
+    });
+  }
+
   window.publierProduit = async function () {
     const nom = document.getElementById("produitNom").value.trim();
     const categorie = document.getElementById("produitCategorie").value;
     const prix = document.getElementById("produitPrix").value.trim();
     const whatsapp = document.getElementById("produitWhatsapp").value.trim();
+    const fichiers = Array.from(document.getElementById("produitPhoto").files).slice(0, 4);
     const msg = document.getElementById("msgProduit");
 
     if (!nom || !prix || !whatsapp) {
@@ -207,8 +233,30 @@
       return;
     }
 
+    let photos = [];
+    if (fichiers.length > 0) {
+      msg.textContent = "Traitement des photos...";
+      msg.className = "msg ok";
+      try {
+        for (const f of fichiers) {
+          const b64 = await compresserImage(f);
+          photos.push(b64);
+        }
+        const tailleTotale = photos.reduce((total, p) => total + p.length, 0);
+        if (tailleTotale > 900000) {
+          msg.textContent = "Trop de photos ou photos trop lourdes, réduis-en le nombre.";
+          msg.className = "msg err";
+          return;
+        }
+      } catch (e) {
+        msg.textContent = "Erreur avec les photos, réessaie.";
+        msg.className = "msg err";
+        return;
+      }
+    }
+
     await addDoc(collection(db, "produits"), {
-      nom, categorie, prix, whatsapp, userId,
+      nom, categorie, prix, whatsapp, userId, photos,
       date: new Date().toISOString()
     });
     await updateDoc(userRef, { prime: increment(50) });
@@ -220,6 +268,7 @@
     document.getElementById("produitNom").value = "";
     document.getElementById("produitPrix").value = "";
     document.getElementById("produitWhatsapp").value = "";
+    document.getElementById("produitPhoto").value = "";
     chargerProduits();
   };
 
@@ -232,7 +281,15 @@
       const d = docu.data();
       const div = document.createElement("div");
       div.className = "produit-item";
-      div.innerHTML = "<b>" + d.nom + "</b> (" + d.categorie + ") - " + d.prix + " FCFA — WhatsApp: " + d.whatsapp;
+      let imgHtml = "";
+      if (d.photos && d.photos.length > 0) {
+        imgHtml = "<div style='display:flex;gap:4px;overflow-x:auto;margin-bottom:6px;'>";
+        d.photos.forEach(p => {
+          imgHtml += "<img src='" + p + "' style='height:90px;border-radius:6px;flex-shrink:0;'>";
+        });
+        imgHtml += "</div>";
+      }
+      div.innerHTML = imgHtml + "<b>" + d.nom + "</b> (" + d.categorie + ") - " + d.prix + " FCFA — WhatsApp: " + d.whatsapp;
       liste.appendChild(div);
     });
   }

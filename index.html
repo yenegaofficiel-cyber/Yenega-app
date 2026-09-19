@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="fr">
 <head>
@@ -7,21 +8,28 @@
 <style>
   body { font-family: Arial, sans-serif; background: #f5f5f0; margin: 0; padding: 0; color: #222; }
   header { background: #0E7A3C; color: #C8A44A; padding: 20px; text-align: center; }
+  header img { width: 80px; height: 80px; border-radius: 50%; margin-bottom: 8px; }
   header h1 { margin: 0; font-size: 28px; }
   header p { margin: 5px 0 0; font-size: 14px; color: white; }
   .section { background: white; margin: 15px; padding: 15px; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
-  .wallet { display: flex; justify-content: space-between; font-weight: bold; }
+  .wallet { display: flex; justify-content: space-between; font-weight: bold; font-size: 15px; }
   .wallet span:first-child { color: #0E7A3C; }
   .wallet span:last-child { color: #C8A44A; }
   input, select { width: 100%; padding: 10px; margin: 6px 0; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; }
   button { width: 100%; padding: 12px; background: #0E7A3C; color: white; border: none; border-radius: 6px; font-size: 16px; margin-top: 8px; }
   .pro { background: #C8A44A; color: white; }
-  h2 { font-size: 18px; color: #0E7A3C; }
+  h2 { font-size: 18px; color: #0E7A3C; margin-top: 0; }
+  .msg { font-size: 13px; margin-top: 6px; min-height: 16px; }
+  .msg.ok { color: #0E7A3C; }
+  .msg.err { color: #b00020; }
+  .produits-liste { margin-top: 10px; }
+  .produit-item { border-top: 1px solid #eee; padding: 8px 0; font-size: 14px; }
 </style>
 </head>
 <body>
 
 <header>
+  <img src="logo.png" alt="Logo YENEGA">
   <h1>YENEGA</h1>
   <p>Le marché qui ne dort jamais</p>
 </header>
@@ -29,21 +37,23 @@
 <div class="section">
   <h2>💰 Mon Portefeuille</h2>
   <div class="wallet">
-    <span>Réel : 0F</span>
-    <span>🔒 Prime bloquée : 250F</span>
+    <span id="soldeReel">Réel : 0F</span>
+    <span id="soldePrime">🔒 Prime bloquée : 0F</span>
   </div>
+  <p style="font-size:12px;color:#888;margin-bottom:0;">Ton identifiant : <span id="monId">...</span></p>
 </div>
 
 <div class="section">
   <h2>🎁 Code Parrainage</h2>
-  <input type="text" placeholder="Entrer un code YENEGA-XXX">
-  <button>Activer Prime</button>
+  <input type="text" id="codeParrainage" placeholder="Entrer un code YENEGA-XXX">
+  <button onclick="activerCode()">Activer Prime</button>
+  <div class="msg" id="msgCode"></div>
 </div>
 
 <div class="section">
   <h2>📸 Publier un Produit (+50F)</h2>
-  <input type="text" placeholder="Nom du produit">
-  <select>
+  <input type="text" id="produitNom" placeholder="Nom du produit">
+  <select id="produitCategorie">
     <option>Pagne</option>
     <option>Karité</option>
     <option>Savon</option>
@@ -51,9 +61,11 @@
     <option>Mode</option>
     <option>Électronique</option>
   </select>
-  <input type="text" placeholder="Prix (FCFA)">
-  <input type="text" placeholder="Ton numéro WhatsApp">
-  <button>Publier +50F</button>
+  <input type="text" id="produitPrix" placeholder="Prix (FCFA)">
+  <input type="text" id="produitWhatsapp" placeholder="Ton numéro WhatsApp">
+  <button onclick="publierProduit()">Publier +50F</button>
+  <div class="msg" id="msgProduit"></div>
+  <div class="produits-liste" id="listeProduits"></div>
 </div>
 
 <div class="section">
@@ -62,13 +74,127 @@
   ✓ Commission 3% au lieu de 5%<br>
   ✓ Parrainage 400F au lieu de 250F<br>
   ✓ 5 filles autorisées</p>
-  <button class="pro">Devenir PRO - 5000F</button>
+  <button class="pro" onclick="demanderPro()">Devenir PRO - 5000F</button>
+  <div class="msg" id="msgPro"></div>
 </div>
+
+<!-- Firebase -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js";
+  import {
+    getFirestore, doc, getDoc, setDoc, updateDoc, increment,
+    collection, addDoc, query, orderBy, limit, getDocs
+  } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyDusygXxe6hHZzH_sh6I_OEWVBFngaFMPc",
+    authDomain: "yenega-aace4.firebaseapp.com",
+    projectId: "yenega-aace4",
+    storageBucket: "yenega-aace4.firebasestorage.app",
+    messagingSenderId: "898044351480",
+    appId: "1:898044351480:web:a3a2b3c8ffd53472a1fc0d",
+    measurementId: "G-YQY80CKQ89"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db = getFirestore(app);
+
+  let userId = localStorage.getItem("yenega_user_id");
+  if (!userId) {
+    userId = "user_" + Math.random().toString(36).substring(2, 10);
+    localStorage.setItem("yenega_user_id", userId);
+  }
+  document.getElementById("monId").textContent = userId;
+
+  const userRef = doc(db, "users", userId);
+
+  async function chargerWallet() {
+    const snap = await getDoc(userRef);
+    if (!snap.exists()) {
+      await setDoc(userRef, { reel: 0, prime: 250, pro: false, filles: 0 });
+      afficherWallet(0, 250);
+    } else {
+      const data = snap.data();
+      afficherWallet(data.reel || 0, data.prime || 0);
+    }
+  }
+
+  function afficherWallet(reel, prime) {
+    document.getElementById("soldeReel").textContent = "Réel : " + reel + "F";
+    document.getElementById("soldePrime").textContent = "🔒 Prime bloquée : " + prime + "F";
+  }
+
+  window.activerCode = async function () {
+    const code = document.getElementById("codeParrainage").value.trim();
+    const msg = document.getElementById("msgCode");
+    if (!code) {
+      msg.textContent = "Entre un code d'abord.";
+      msg.className = "msg err";
+      return;
+    }
+    await updateDoc(userRef, { prime: increment(250) });
+    const snap = await getDoc(userRef);
+    afficherWallet(snap.data().reel, snap.data().prime);
+    msg.textContent = "Prime de 250F ajoutée !";
+    msg.className = "msg ok";
+    document.getElementById("codeParrainage").value = "";
+  };
+
+  window.publierProduit = async function () {
+    const nom = document.getElementById("produitNom").value.trim();
+    const categorie = document.getElementById("produitCategorie").value;
+    const prix = document.getElementById("produitPrix").value.trim();
+    const whatsapp = document.getElementById("produitWhatsapp").value.trim();
+    const msg = document.getElementById("msgProduit");
+
+    if (!nom || !prix || !whatsapp) {
+      msg.textContent = "Remplis tous les champs.";
+      msg.className = "msg err";
+      return;
+    }
+
+    await addDoc(collection(db, "produits"), {
+      nom, categorie, prix, whatsapp, userId,
+      date: new Date().toISOString()
+    });
+    await updateDoc(userRef, { prime: increment(50) });
+    const snap = await getDoc(userRef);
+    afficherWallet(snap.data().reel, snap.data().prime);
+
+    msg.textContent = "Produit publié ! +50F ajoutés.";
+    msg.className = "msg ok";
+    document.getElementById("produitNom").value = "";
+    document.getElementById("produitPrix").value = "";
+    document.getElementById("produitWhatsapp").value = "";
+    chargerProduits();
+  };
+
+  async function chargerProduits() {
+    const q = query(collection(db, "produits"), orderBy("date", "desc"), limit(10));
+    const snap = await getDocs(q);
+    const liste = document.getElementById("listeProduits");
+    liste.innerHTML = "";
+    snap.forEach(docu => {
+      const d = docu.data();
+      const div = document.createElement("div");
+      div.className = "produit-item";
+      div.innerHTML = "<b>" + d.nom + "</b> (" + d.categorie + ") - " + d.prix + " FCFA — WhatsApp: " + d.whatsapp;
+      liste.appendChild(div);
+    });
+  }
+
+  window.demanderPro = async function () {
+    const msg = document.getElementById("msgPro");
+    await addDoc(collection(db, "demandes_pro"), {
+      userId, date: new Date().toISOString(), statut: "en_attente"
+    });
+    msg.textContent = "Demande enregistrée. Envoie 5000F au 56 23 11 11 (Orange Money), ton badge PRO sera activé après vérification.";
+    msg.className = "msg ok";
+  };
+
+  chargerWallet();
+  chargerProduits();
+</script>
 
 </body>
 </html>
-<header>
-  <img src="logo.png" alt="Logo YENEGA" style="width:80px; height:80px; border-radius:50%; margin-bottom:8px;">
-  <h1>YENEGA</h1>
-  <p>Le marché qui ne dort jamais</p>
-</header>

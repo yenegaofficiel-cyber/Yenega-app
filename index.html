@@ -129,7 +129,14 @@
       afficherWallet(0, 250, monCode);
     } else {
       const data = snap.data();
-      afficherWallet(data.reel || 0, data.prime || 0, data.monCode || "...");
+      if (!data.monCode) {
+        const monCode = genererCode();
+        await updateDoc(userRef, { monCode, codeUtilise: data.codeUtilise || false });
+        await setDoc(doc(db, "codes", monCode), { ownerId: userId });
+        afficherWallet(data.reel || 0, data.prime || 0, monCode);
+      } else {
+        afficherWallet(data.reel || 0, data.prime || 0, data.monCode);
+      }
     }
   }
 

@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="fr">
 <head>
@@ -44,8 +43,14 @@
 </div>
 
 <div class="section">
-  <h2>🎁 Code Parrainage</h2>
-  <input type="text" id="codeParrainage" placeholder="Entrer un code YENEGA-XXX">
+  <h2>🎁 Mon code à partager</h2>
+  <p style="font-size:20px;font-weight:bold;color:#0E7A3C;text-align:center;letter-spacing:1px;" id="monCode">...</p>
+  <p style="font-size:12px;color:#888;">Partage ce code : chaque personne qui l'utilise reçoit une prime.</p>
+</div>
+
+<div class="section">
+  <h2>🎁 Utiliser un Code Parrainage</h2>
+  <input type="text" id="codeParrainage" placeholder="Entrer un code YENEGA-XXXX">
   <button onclick="activerCode()">Activer Prime</button>
   <div class="msg" id="msgCode"></div>
 </div>
@@ -83,7 +88,7 @@
   import { initializeApp } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js";
   import {
     getFirestore, doc, getDoc, setDoc, updateDoc, increment,
-    collection, addDoc, query, orderBy, limit, getDocs
+    collection, addDoc, query, orderBy, limit, getDocs, where
   } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js";
 
   const firebaseConfig = {
@@ -108,34 +113,76 @@
 
   const userRef = doc(db, "users", userId);
 
+  function genererCode() {
+    const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    let suffix = "";
+    for (let i = 0; i < 4; i++) suffix += chars[Math.floor(Math.random() * chars.length)];
+    return "YENEGA-" + suffix;
+  }
+
   async function chargerWallet() {
     const snap = await getDoc(userRef);
     if (!snap.exists()) {
-      await setDoc(userRef, { reel: 0, prime: 250, pro: false, filles: 0 });
-      afficherWallet(0, 250);
+      const monCode = genererCode();
+      await setDoc(userRef, { reel: 0, prime: 250, pro: false, filles: 0, monCode, codeUtilise: false });
+      await setDoc(doc(db, "codes", monCode), { ownerId: userId });
+      afficherWallet(0, 250, monCode);
     } else {
       const data = snap.data();
-      afficherWallet(data.reel || 0, data.prime || 0);
+      afficherWallet(data.reel || 0, data.prime || 0, data.monCode || "...");
     }
   }
 
-  function afficherWallet(reel, prime) {
+  function afficherWallet(reel, prime, monCode) {
     document.getElementById("soldeReel").textContent = "Réel : " + reel + "F";
     document.getElementById("soldePrime").textContent = "🔒 Prime bloquée : " + prime + "F";
+    if (monCode) document.getElementById("monCode").textContent = monCode;
   }
 
   window.activerCode = async function () {
-    const code = document.getElementById("codeParrainage").value.trim();
+    const codeSaisi = document.getElementById("codeParrainage").value.trim().toUpperCase();
     const msg = document.getElementById("msgCode");
-    if (!code) {
+
+    if (!codeSaisi) {
       msg.textContent = "Entre un code d'abord.";
       msg.className = "msg err";
       return;
     }
-    await updateDoc(userRef, { prime: increment(250) });
+
+    const monSnap = await getDoc(userRef);
+    const monData = monSnap.data();
+
+    if (monData.codeUtilise) {
+      msg.textContent = "Tu as déjà utilisé un code de parrainage.";
+      msg.className = "msg err";
+      return;
+    }
+
+    if (codeSaisi === monData.monCode) {
+      msg.textContent = "Tu ne peux pas utiliser ton propre code.";
+      msg.className = "msg err";
+      return;
+    }
+
+    const codeRef = doc(db, "codes", codeSaisi);
+    const codeSnap = await getDoc(codeRef);
+
+    if (!codeSnap.exists()) {
+      msg.textContent = "Ce code n'existe pas.";
+      msg.className = "msg err";
+      return;
+    }
+
+    const parrainId = codeSnap.data().ownerId;
+    const parrainSnap = await getDoc(doc(db, "users", parrainId));
+    const parrainEstPro = parrainSnap.exists() && parrainSnap.data().pro;
+    const bonus = parrainEstPro ? 400 : 250;
+
+    await updateDoc(userRef, { prime: increment(bonus), codeUtilise: true });
     const snap = await getDoc(userRef);
-    afficherWallet(snap.data().reel, snap.data().prime);
-    msg.textContent = "Prime de 250F ajoutée !";
+    afficherWallet(snap.data().reel, snap.data().prime, snap.data().monCode);
+
+    msg.textContent = "Code valide ! +" + bonus + "F ajoutés.";
     msg.className = "msg ok";
     document.getElementById("codeParrainage").value = "";
   };
